@@ -85,6 +85,55 @@ const palette = {
 const fmtKES = (n) =>
   "KES " + Number(n || 0).toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
+/* ---------------------------------- logo raster for thermal printing ---------------------------------- */
+// Converts the inline LOGO_DATA_URI into a 1-bit monochrome ESC/POS raster image
+// (GS v 0 command), so the brand logo prints at the top of Bluetooth thermal receipts.
+let _logoRasterCache = null;
+function _loadImageEl(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+async function getLogoEscPosRaster(targetWidthPx = 192) {
+  if (_logoRasterCache) return _logoRasterCache;
+  try {
+    const img = await _loadImageEl(LOGO_DATA_URI);
+    const scale = targetWidthPx / img.width;
+    const w = targetWidthPx;
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    const bytesPerRow = Math.ceil(w / 8);
+    const raster = new Uint8Array(bytesPerRow * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+        const a = data[idx + 3];
+        const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        if (a > 128 && lum < 128) {
+          raster[y * bytesPerRow + (x >> 3)] |= (0x80 >> (x & 7));
+        }
+      }
+    }
+    const header = [0x1D, 0x76, 0x30, 0x00, bytesPerRow & 0xFF, (bytesPerRow >> 8) & 0xFF, h & 0xFF, (h >> 8) & 0xFF];
+    const result = new Uint8Array(header.length + raster.length);
+    result.set(header, 0);
+    result.set(raster, header.length);
+    _logoRasterCache = result;
+    return result;
+  } catch (e) {
+    return new Uint8Array(0); // if it can't be rendered, just skip the logo gracefully
+  }
+}
+
 /* ---------------------------------- Bluetooth thermal printing (ESC/POS) ---------------------------------- */
 // Common service/characteristic UUIDs used by generic BLE thermal printers (P58E and similar clones).
 const BT_PRINTER_SERVICES = [
@@ -131,7 +180,7 @@ async function writeBytesToPrinter(characteristic, bytes) {
 }
 
 // Build raw ESC/POS bytes for a 58mm printer (32-character line width).
-function buildEscPosReceipt(sale, businessInfo) {
+async function buildEscPosReceipt(sale, businessInfo) {
   const WIDTH = 32;
   const enc = new TextEncoder();
   const bytes = [];
@@ -148,7 +197,10 @@ function buildEscPosReceipt(sale, businessInfo) {
   };
 
   push([0x1B, 0x40]); // init
-  center(true); bold(true);
+  center(true);
+  const logoRaster = await getLogoEscPosRaster();
+  if (logoRaster.length) { push(Array.from(logoRaster)); push([0x0A]); }
+  bold(true);
   line(businessInfo.name);
   bold(false);
   line(businessInfo.address);
@@ -259,7 +311,7 @@ function App() {
         conn.device.addEventListener("gattserverdisconnected", () => { setPrinter(null); showToast("Printer disconnected"); });
         setPrinter(conn);
       }
-      const bytes = buildEscPosReceipt(sale, businessInfo);
+      const bytes = await buildEscPosReceipt(sale, businessInfo);
       await writeBytesToPrinter(conn.characteristic, bytes);
       showToast("Sent to printer");
     } catch (e) {
@@ -813,6 +865,9 @@ function ReceiptModal({ t, sale, businessInfo, printer, printViaBluetooth, onClo
       <div className="receipt-print" style={{ width: 300, background: "#fff", color: "#222", borderRadius: 4, position: "relative", fontFamily: "'Courier New', monospace" }}>
         <button onClick={onClose} className="no-print" style={{ position: "absolute", top: -12, right: -12, width: 28, height: 28, borderRadius: "50%", background: palette.wine, color: "#fff", border: "3px solid #fff", cursor: "pointer" }}><X size={13} /></button>
         <div style={{ padding: "20px 18px 14px", borderBottom: "1px dashed #999" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
+            <img src={LOGO_DATA_URI} alt="" style={{ maxHeight: 46, width: "auto", display: "block" }} />
+          </div>
           <div style={{ textAlign: "center", fontWeight: 700, fontSize: 14 }}>{businessInfo.name}</div>
           <div style={{ textAlign: "center", fontSize: 10, color: "#555" }}>{businessInfo.address} · {businessInfo.phone}</div>
           <div style={{ textAlign: "center", fontSize: 10, color: "#555" }}>PIN: {businessInfo.pin}</div>
