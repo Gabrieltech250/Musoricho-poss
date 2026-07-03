@@ -506,6 +506,13 @@ function App() {
 
 /* ---------------------------------- login ---------------------------------- */
 const ROLE_PASSWORDS = { Administrator: "1950", Manager: "7239", Cashier: "1441" };
+const RESET_EMAIL = "gabrielyukon77@gmail.com";
+
+function buildResetMailto(role, name) {
+  const subject = `MUSORICHO POS - Password Reset Request (${role})`;
+  const body = `Hello,\n\nI am unable to sign in to the MUSORICHO POS system and would like to request my password.\n\nRole: ${role}\nStaff name: ${name || "(not entered)"}\n\nPlease confirm my identity before sharing the password.\n\nThanks.`;
+  return `mailto:${RESET_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
 
 function Login({ t, dark, setDark, onLogin }) {
   const [mode, setMode] = useState("staff"); // "staff" | "admin"
@@ -585,6 +592,11 @@ function Login({ t, dark, setDark, onLogin }) {
             {showPassword ? "Hide" : "Show"}
           </button>
         </div>
+        <div style={{ textAlign: "right", marginBottom: 6 }}>
+          <a href={buildResetMailto(activeRole, name)} style={{ fontSize: 11.5, color: palette.wine, fontWeight: 600, textDecoration: "underline" }}>
+            Forgot password?
+          </a>
+        </div>
         {error && <div style={{ color: palette.danger, fontSize: 11.5, marginBottom: 14 }}>{error}</div>}
         {!error && <div style={{ marginBottom: 20 }} />}
 
@@ -607,7 +619,7 @@ function Login({ t, dark, setDark, onLogin }) {
           </div>
         )}
 
-        <div style={{ textAlign: "center", marginTop: 14, fontSize: 11.5, color: t.sub }}>Contact your administrator if you don't have your password.</div>
+        <div style={{ textAlign: "center", marginTop: 14, fontSize: 11.5, color: t.sub }}>Forgot your password? Tap "Forgot password?" above to email the administrator.</div>
       </div>
     </div>
   );
